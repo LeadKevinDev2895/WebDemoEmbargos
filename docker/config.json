@@ -1,0 +1,64 @@
+{
+  "Globales": {
+    "CodigoProyecto": "R_Dav_EmbargosyDesembargos_MVP2",
+    "NombreProyecto": "Embargos y Desembargos MVP2", 
+    "SiglaCompania": "DAV",
+    "RutaBaseProyecto": "/app/DavExtraccion/",
+    "RutaTemp": "/app/DavExtraccion/Temp",
+    "RutaPublicador": "/app/DavExtraccion/Publicador",
+    "RutaPrompts": "/app/DavExtraccion/Prompts",
+    "NumHilosDocFly" : "10",
+    "NumHilosClasificador" : "5", 
+    "enviroment" : "env",
+    "RutaSalidaArchivos": "/app/DavExtraccion/Salida"
+  },
+  "Parametros": {
+    "InsertarDocumentosDuplicados": false,
+    "BancoCuentaDepositoDefault": "AGRARIO",
+    "CuentaBancariaDefault": "632010000000",
+    "NumeroDocumentoDian": "800197268"
+  },
+  "Logs": {
+    "NombreLogSistema": "R_Dav_EmbargosyDesembargos_MVP2_LOG_DE_ERRORES.log",
+    "RutaLogSistema": "/Logs/Logs Sistema/",
+    "NombreLogAuditoria": "R_Dav_EmbargosyDesembargos_MVP2_LOG_DE_AUDITORIA.log",
+    "RutaLogAuditoria": "/Logs/Logs Auditoria/"
+
+  },
+  "BaseDatos": {
+    "Servidor": "34.42.117.63",
+    "Puerto": "5439",
+    "BaseDatos": "centralizacion",
+    "SqlSchema": "public"  
+  },
+  "DocumentConversion": {
+    "LibreOfficePath": "/usr/bin/soffice",
+    "UnRarPath": "/usr/bin/unrar"
+  },
+  "WebScraping": {
+    "UrlBase": "https://davibox.davivienda.com/webclient/Login.xhtml",
+    "CarpetaBase" : "Integracion_EyD_Proceso",
+    "RutaDescarga" : "/app/downloads",
+    "ChromeDriverPath": "/usr/local/bin/chromedriver",
+    "CarpetaDescarga": "Integracion_EyD_Proceso",
+    "CarpetaSubida": "Imagenes EyD_Proceso"
+  },
+  "NotificacionesEmail": {
+    "SMTPServer": "smtp.gmail.com",
+    "SMTPPort": 587,
+    "EmailRemitente": "kevin.orduz@trycore.com.co",
+    "EmailDestinatarios": ["kevin.orduz@trycore.com.co"]
+  },
+  "Airflow": {
+    "ServiceUri": "http://localhost:8080/api/v1",
+    "Usuario": "admin",
+    "Password": "admin",
+    "DagId": "process_excel_dag"
+  },
+  "Cortes": {
+    "InicioCorte1": "07:00:00",
+    "FinCorte1": "11:44:59",
+    "InicioCorte2": "11:45:00",
+    "FinCorte2": "16:30:00"
+  }
+}

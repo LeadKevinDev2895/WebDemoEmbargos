@@ -1,0 +1,44 @@
+# Byte-compiled files
+*.pyc
+*.pyo
+__pycache__/
+
+# Virtual environment folder
+venv/
+env/
+env-mvp2/
+
+# Flask instance folder (if used)
+instance/
+
+# Flask configuration files
+/.env
+*.ini
+*.cfg
+
+# IDE/editor specific files
+.vscode/
+.idea/
+*.sublime-workspace
+*.sublime-project
+
+# OS-specific files
+.DS_Store
+Thumbs.db
+
+# Database files (if any)
+*.sqlite3
+*.db
+
+# Logs
+*.log
+
+# Cache files
+*.pyc
+*.pyo
+*.pyd
+
+#Output
+output/
+app/config/config.json
+
