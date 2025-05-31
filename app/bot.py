@@ -165,6 +165,8 @@ class Bot:
             # or adapt process_file_main to return a (bool, message) pair.
             # For now, let's assume it raises exceptions on critical failure.
             file_orchestrator.process_file_main(temp_save_path, original_filename_param=original_filename)
+            # Se unen archivos hijos a archivos padre
+            file_orchestrator.unir_archivos_padre_hijos()
 
             # If process_file_main completes without error, assume success for this high-level task.
             # Detailed per-file success/failure is handled within the orchestrator/DB handler.
