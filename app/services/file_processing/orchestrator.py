@@ -22,6 +22,21 @@ class FileOrchestrator:
         # file_path is the path to the file already saved in RutaTemp by the Bot.
         # original_filename_param is the original name of the uploaded file.
 
+        """
+        Función principal para procesar una ruta de archivo dada.
+        Maneja la creación de directorios temporales, la copia de archivos, el procesamiento
+        y la inserción en la base de datos.
+        """
+        temp_dir = current_app.config['GLOBALES']['RutaTemp']
+        if os.path.exists(temp_dir):
+            shutil.rmtree(temp_dir)
+            print(f"Carpeta temporal eliminada: {temp_dir}")
+            LogService.audit_log(f"Carpeta temporal eliminada: {temp_dir}", TASK_NAME)
+        os.makedirs(temp_dir, exist_ok=True)
+
+        temp_file_path = f"{temp_dir}/{os.path.basename(file_path)}"
+        copy2(file_path, temp_file_path)
+
         LogService.audit_log(f"Starting processing for file: {file_path}, Original filename hint: {original_filename_param}", TASK_NAME)
 
         file_set = {} # This will be populated by process_compressed
