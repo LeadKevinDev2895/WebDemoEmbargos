@@ -5,6 +5,7 @@ from pathlib import Path
 from shutil import copy2
 from app.models.enums import EstadoProceso, TipoProcesamiento
 from flask import current_app
+import hashlib # Add to imports
 from app.utils.LogService import LogService
 from app.repositories.documento_repository import DocumentoRepository
 from app.utils.funciones import unir_pdfs, es_pdf_valido
@@ -17,37 +18,43 @@ class FileOrchestrator:
         self.file_publisher = file_publisher
         self.database_handler = database_handler
 
-    def process_file_main(self, file_path):
-        """
-        Función principal para procesar una ruta de archivo dada.
-        Maneja la creación de directorios temporales, la copia de archivos, el procesamiento
-        y la inserción en la base de datos.
-        """
-        temp_dir = current_app.config['GLOBALES']['RutaTemp']
-        if os.path.exists(temp_dir):
-            shutil.rmtree(temp_dir)
-            print(f"Carpeta temporal eliminada: {temp_dir}")
-            LogService.audit_log(f"Carpeta temporal eliminada: {temp_dir}", TASK_NAME)
-        os.makedirs(temp_dir, exist_ok=True)
+    def process_file_main(self, file_path, original_filename_param=None):
+        # file_path is the path to the file already saved in RutaTemp by the Bot.
+        # original_filename_param is the original name of the uploaded file.
 
-        temp_file_path = f"{temp_dir}/{os.path.basename(file_path)}"
-        copy2(file_path, temp_file_path)
+        LogService.audit_log(f"Starting processing for file: {file_path}, Original filename hint: {original_filename_param}", TASK_NAME)
 
-        file_set = {}
-        self.compressed_handler.process_compressed(temp_file_path, file_set=file_set)
+        file_set = {} # This will be populated by process_compressed
 
-        result_list = [
-            {
-                "original_path": str(path).replace('\\', '/'),
+        self.compressed_handler.process_compressed(
+            file_path,
+            file_set=file_set,
+            original_filename_for_single_file=original_filename_param # Pass it here
+        )
+
+        # Construct result_list from file_set, ensuring keys match DatabaseHandler expectations
+        result_list = []
+        for key_path, file_info in file_set.items(): # key_path is the actual path of the file processed (either the uploaded single file, or an extracted file)
+            if not all(k in file_info for k in ["hash", "converted_path", "file_type", "user_facing_original_name", "actual_source_path_for_publishing"]):
+                LogService.error_log(f"Skipping file_info for key {key_path} due to missing essential keys. Info: {file_info}", TASK_NAME)
+                continue
+
+            result_list.append({
+                "user_facing_original_name": file_info["user_facing_original_name"],
+                "actual_source_path_for_publishing": file_info["actual_source_path_for_publishing"],
                 "hash": file_info["hash"],
-                "converted_path": str(file_info["converted_path"]).replace('\\', '/'),
+                "converted_path": str(file_info["converted_path"]).replace('\\', '/'), # Ensure path is clean
                 "file_type": file_info["file_type"]
-            }
-            for path, file_info in file_set.items()
-        ]
+            })
+
+        if not result_list and file_set:
+             LogService.error_log(f"No valid files to insert into DB from file_set for {file_path} (original: {original_filename_param}). File_set: {file_set}", TASK_NAME)
+        elif not file_set:
+             LogService.audit_log(f"No files were processed (file_set is empty) for {file_path} (original: {original_filename_param}). This might be normal if it was an empty archive or an unsupported single file type not processed by CompressedFileHandler.", TASK_NAME)
+
 
         self.database_handler.insert_document_data(result_list)
-        return result_list
+        return result_list # Return the list of processed data, useful for logging or potential future use.
 
     def unir_archivos_padre_hijos(self):
         """

@@ -1,6 +1,6 @@
 import os
 from dotenv import load_dotenv
-from flask import Blueprint, jsonify, current_app, request
+from flask import Blueprint, jsonify, current_app, request, render_template, flash, redirect, url_for
 from app.bot import Bot
 
 
@@ -45,3 +45,35 @@ def start_upload_taxonomia():
 #     load_dotenv(override=True)  # Recarga el .env
 #     print(f"Variables recargadas {current_app.config['WEBCREDENTIALS']['USERNAME']}")
 #     return {"status": "Variables recargadas"}
+
+@bp.route('/upload_ui')
+def upload_ui():
+    return render_template('upload.html')
+
+@bp.route('/upload_document_or_archive', methods=['POST'])
+def upload_document_or_archive():
+    if 'file' not in request.files:
+        flash('No file part', 'error')
+        return redirect(url_for('routes.upload_ui'))
+
+    file = request.files['file']
+    if file.filename == '':
+        flash('No selected file', 'error')
+        return redirect(url_for('routes.upload_ui'))
+
+    if file:
+        try:
+            bot = Bot(current_app._get_current_object())
+            # This method will be created in the next step in app/bot.py
+            success, message = bot.run_unified_upload_processing(file)
+            flash(message, 'success' if success else 'error')
+        except Exception as e:
+            # Log the exception e using LogService or current_app.logger
+            # For now, flash a generic error.
+            # Consider using LogService.error_log(f"Error in upload: {e}", "Routes")
+            flash(f"An unexpected error occurred during processing: {str(e)}", 'error')
+    else:
+        # This case should ideally not be reached if above checks are done.
+        flash('File upload failed for an unknown reason.', 'error')
+
+    return redirect(url_for('routes.upload_ui'))

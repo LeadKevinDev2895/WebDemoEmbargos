@@ -12,6 +12,7 @@ from app.services.file_processing.database_handler import DatabaseHandler
 from app.services.file_processing.orchestrator import FileOrchestrator
 import traceback
 from flask import current_app
+from werkzeug.utils import secure_filename
 
 
 class Bot:
@@ -34,6 +35,18 @@ class Bot:
             self.folder_taxonomy = current_app.config["GLOBALES"]["RutaSalidaArchivos"]
             self.email_service = EmailService(self.smtp_server, self.smtp_port, self.sender_email,
                                               self.email_password, self.to_emails, self.bot_name)
+
+    def _get_file_orchestrator(self):
+        # Ensures that instances are created within the app context if they need config
+        with self.app.app_context():
+            file_processor_instance = FileProcessor()
+            file_publisher_instance = FilePublisher() # FilePublisher uses current_app.config
+            compressed_file_handler_instance = CompressedFileHandler(file_processor_instance)
+            database_handler_instance = DatabaseHandler(file_publisher_instance) # DatabaseHandler uses current_app.config
+            file_orchestrator = FileOrchestrator(compressed_file_handler_instance,
+                                                 file_publisher_instance,
+                                                 database_handler_instance)
+        return file_orchestrator
 
     def run_download_files(self):
         with self.app.app_context():  # Inicia el contexto de la aplicación
@@ -95,6 +108,61 @@ class Bot:
 
                 # Levanta una nueva excepción con más detalles
                 raise Exception(f"Error el funcionamiento del BOT: {e}\nTraceback: {error_trace}")
+
+    def run_unified_upload_processing(self, uploaded_file_object):
+        if not uploaded_file_object or not uploaded_file_object.filename:
+            LogService.error_log("Invalid file object or filename received for upload.", self.bot_name)
+            return False, "No file or filename provided."
+
+        original_filename = secure_filename(uploaded_file_object.filename)
+        LogService.audit_log(f"Attempting unified upload for: {original_filename}", self.bot_name)
+
+        temp_dir = None # Define temp_dir to ensure it's in scope for finally
+        temp_save_path = None # Define temp_save_path for broader scope in finally
+
+        try:
+            with self.app.app_context(): # Ensure app context for config access
+                temp_dir = current_app.config['GLOBALES']['RutaTemp']
+                os.makedirs(temp_dir, exist_ok=True)
+
+            temp_save_path = os.path.join(temp_dir, original_filename)
+            uploaded_file_object.save(temp_save_path)
+            LogService.audit_log(f"File saved temporarily to {temp_save_path}", self.bot_name)
+
+            file_orchestrator = self._get_file_orchestrator()
+
+            # Assuming process_file_main will be adapted to handle original_filename
+            # and internally pass it to where it's needed (CompressedFileHandler for single files).
+            # For now, process_file_main might not use original_filename directly,
+            # but CompressedFileHandler will need it.
+            # The result_list from process_file_main is not directly used here for messaging,
+            # as process_file_main's main job is orchestration and DB insertion.
+            # We rely on logs for details and assume success if no exception.
+
+            # process_file_main returns a result_list, but for messaging, we'll give a generic one for now,
+            # or adapt process_file_main to return a (bool, message) pair.
+            # For now, let's assume it raises exceptions on critical failure.
+            file_orchestrator.process_file_main(temp_save_path, original_filename_param=original_filename)
+
+            # If process_file_main completes without error, assume success for this high-level task.
+            # Detailed per-file success/failure is handled within the orchestrator/DB handler.
+            success_message = f"File '{original_filename}' received and processing initiated."
+            LogService.audit_log(success_message, self.bot_name)
+            return True, success_message
+
+        except Exception as e:
+            error_message = f"Error during unified upload processing for '{original_filename}': {str(e)}"
+            LogService.error_log(error_message, self.bot_name)
+            # Consider logging traceback.format_exc() for more detail in logs
+            return False, error_message
+        finally:
+            # Clean up the temporarily saved file
+            if temp_save_path and os.path.exists(temp_save_path):
+                try:
+                    os.remove(temp_save_path)
+                    LogService.audit_log(f"Temporary file {temp_save_path} removed.", self.bot_name)
+                except Exception as e_remove:
+                    LogService.error_log(f"Error removing temporary file {temp_save_path}: {e_remove}", self.bot_name)
 
     def run_taxonomia(self):
         with self.app.app_context():  # Inicia el contexto de la aplicación

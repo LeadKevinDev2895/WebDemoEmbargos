@@ -118,44 +118,103 @@ class CompressedFileHandler:
             LogService.error_log(f"Error al calcular el hash para {file_path}: {e}", TASK_NAME)
             return None
 
-    def process_compressed(self, file_path, extract_to=None, file_set=None):
-        """
-        Extrae archivos de un archivo comprimido y procesa cada archivo extraído.
-        """
-        file_path = self.ensure_valid_path(file_path)
-
-        if extract_to is None:
-            extract_to = Path(file_path).parent / Path(file_path).stem
-        extract_to = self.ensure_valid_path(extract_to)
-
-        if not os.path.exists(extract_to):
-            os.makedirs(extract_to)
+    def process_compressed(self, file_path, extract_to=None, file_set=None, original_filename_for_single_file=None):
+        file_path_abs = self.ensure_valid_path(file_path) # Ensure path is absolute and handles long paths
 
         if file_set is None:
             file_set = {}
 
-        print(f"Extrayendo y procesando archivo comprimido: {file_path}")
-        LogService.audit_log(f"Extrayendo y procesando archivo comprimido: {file_path}", TASK_NAME)
+        is_archive = False
         try:
-            self.extract_file(file_path, extract_to)
-            LogService.audit_log(f"Archivo extraído: {file_path}", TASK_NAME)
-        except Exception as e:
-            print(f"Error al extraer el archivo {file_path}: {e}")
-            LogService.error_log(f"Error al extraer el archivo {file_path}: {e}", TASK_NAME)
-            return
+            if zipfile.is_zipfile(file_path_abs):
+                is_archive = True
+            elif rarfile.is_rarfile(file_path_abs):
+                is_archive = True
+            elif tarfile.is_tarfile(file_path_abs): # This checks for .tar, .tar.gz, .tar.bz2 etc.
+                is_archive = True
+            elif file_path_abs.lower().endswith('.7z'): # py7zr doesn't have a simple is_7zfile
+                # Basic check, could be more robust by trying to open with py7zr
+                try:
+                    with py7zr.SevenZipFile(file_path_abs, mode='r') as _:
+                        is_archive = True
+                except py7zr.exceptions.Bad7zFile:
+                    is_archive = False # Not a valid 7z file
+                except Exception: # Other errors during check
+                    is_archive = False
+        except Exception as e_check:
+            LogService.error_log(f"Error during archive type check for {file_path_abs}: {e_check}", TASK_NAME)
+            is_archive = False # Assume not an archive if check fails
 
-        for root, dirs, files in os.walk(extract_to):
-            for file in files:
-                extracted_file_path = os.path.join(root, file)
-                if extracted_file_path not in file_set:
-                    file_hash = self.calculate_hash(extracted_file_path)
-                    try:
-                        converted_path, file_type = self.file_processor.process_file(extracted_file_path, file_set)
-                        file_set[extracted_file_path] = {
-                            "hash": file_hash,
-                            "converted_path": str(converted_path) if converted_path else str(extracted_file_path),
-                            "file_type": file_type
-                        }
-                    except Exception as e:
-                        print(f"Error al procesar el archivo {extracted_file_path}: {e}")
-                        LogService.error_log(f"Error al procesar el archivo {extracted_file_path}: {e}", TASK_NAME)
+        if is_archive:
+            LogService.audit_log(f"Processing as ARCHIVE: {file_path_abs}", TASK_NAME)
+            if extract_to is None:
+                # Default extraction path: subdirectory named after the archive file (without extension)
+                extract_to = Path(file_path_abs).parent / Path(file_path_abs).stem
+            extract_to_abs = self.ensure_valid_path(str(extract_to))
+
+            if not os.path.exists(extract_to_abs):
+                os.makedirs(extract_to_abs)
+
+            try:
+                extraction_success = self.extract_file(file_path_abs, extract_to_abs) # extract_file is an existing method
+                if not extraction_success:
+                    LogService.error_log(f"Extraction failed for archive {file_path_abs}. Cannot process contents.", TASK_NAME)
+                    return # Stop if extraction fails
+            except Exception as e_extract:
+                LogService.error_log(f"Exception during extraction of {file_path_abs}: {e_extract}", TASK_NAME)
+                return
+
+            # Process extracted files
+            for root, dirs, files in os.walk(extract_to_abs):
+                for file_in_archive in files:
+                    extracted_file_full_path = os.path.join(root, file_in_archive)
+                    # Use relative path within archive as user_facing_original_name
+                    # This requires making extracted_file_full_path relative to extract_to_abs
+                    relative_path_in_archive = os.path.relpath(extracted_file_full_path, extract_to_abs)
+
+                    if extracted_file_full_path not in file_set: # Avoid reprocessing if somehow already there
+                        file_hash = self.calculate_hash(extracted_file_full_path)
+                        if not file_hash:
+                            LogService.error_log(f"Could not calculate hash for extracted file {extracted_file_full_path}. Skipping.", TASK_NAME)
+                            continue
+                        try:
+                            # file_set is passed for FileProcessor internal state if it ever needs it, currently not used by it.
+                            converted_path, file_type = self.file_processor.process_file(extracted_file_full_path, file_set)
+
+                            file_set[extracted_file_full_path] = { # Key is the actual path of the extracted file
+                                "hash": file_hash,
+                                "converted_path": str(converted_path) if converted_path else str(extracted_file_full_path),
+                                "file_type": file_type,
+                                "user_facing_original_name": relative_path_in_archive.replace('\\', '/'), # Path inside archive
+                                "actual_source_path_for_publishing": extracted_file_full_path # This is the file to publish
+                            }
+                        except Exception as e_proc:
+                            LogService.error_log(f"Error processing extracted file {extracted_file_full_path}: {e_proc}", TASK_NAME)
+
+            # Optional: Clean up extract_to_abs directory if it's temporary and all files are copied/processed.
+            # Current logic keeps it. If it needs cleanup, shutil.rmtree(extract_to_abs) could be added.
+
+        else: # Process as a SINGLE FILE
+            LogService.audit_log(f"Processing as SINGLE FILE: {file_path_abs}", TASK_NAME)
+            file_hash = self.calculate_hash(file_path_abs)
+            if not file_hash:
+                LogService.error_log(f"Could not calculate hash for single file {file_path_abs}. Skipping.", TASK_NAME)
+                return # Stop if hash fails
+
+            try:
+                # file_set is passed for FileProcessor internal state, currently not used by it.
+                converted_path, file_type = self.file_processor.process_file(file_path_abs, file_set)
+
+                user_name = original_filename_for_single_file if original_filename_for_single_file else os.path.basename(file_path_abs)
+
+                file_set[file_path_abs] = { # Key is the actual path of the single uploaded file
+                    "hash": file_hash,
+                    "converted_path": str(converted_path) if converted_path else str(file_path_abs),
+                    "file_type": file_type,
+                    "user_facing_original_name": user_name, # Original filename given by user
+                    "actual_source_path_for_publishing": file_path_abs # This is the file to publish
+                }
+            except Exception as e_proc_single:
+                LogService.error_log(f"Error processing single file {file_path_abs}: {e_proc_single}", TASK_NAME)
+
+        # file_set is populated by reference and used by FileOrchestrator after this method returns.
