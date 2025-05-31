@@ -228,6 +228,11 @@ class Bot:
                 except Exception as e_remove:
                     LogService.error_log(f"Error removing temporary file {temp_save_path}: {e_remove}", self.bot_name)
 
+        # ---- ADD DIAGNOSTIC LOG HERE ----
+        LogService.audit_log(f"BOT: About to return from run_unified_upload_processing. Success: {overall_success}, UI_Msg: '{message_for_ui}', UI_Cat: '{ui_category}'", self.bot_name)
+
+        return overall_success, message_for_ui, ui_category
+
     def run_taxonomia(self):
         with self.app.app_context():  # Inicia el contexto de la aplicación
             print("Bot Taxonomia está ejecutándose...")
