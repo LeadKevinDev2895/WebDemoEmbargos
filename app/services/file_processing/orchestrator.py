@@ -22,21 +22,6 @@ class FileOrchestrator:
         # file_path is the path to the file already saved in RutaTemp by the Bot.
         # original_filename_param is the original name of the uploaded file.
 
-        """
-        Función principal para procesar una ruta de archivo dada.
-        Maneja la creación de directorios temporales, la copia de archivos, el procesamiento
-        y la inserción en la base de datos.
-        """
-        temp_dir = current_app.config['GLOBALES']['RutaTemp']
-        if os.path.exists(temp_dir):
-            shutil.rmtree(temp_dir)
-            print(f"Carpeta temporal eliminada: {temp_dir}")
-            LogService.audit_log(f"Carpeta temporal eliminada: {temp_dir}", TASK_NAME)
-        os.makedirs(temp_dir, exist_ok=True)
-
-        temp_file_path = f"{temp_dir}/{os.path.basename(file_path)}"
-        copy2(file_path, temp_file_path)
-
         LogService.audit_log(f"Starting processing for file: {file_path}, Original filename hint: {original_filename_param}", TASK_NAME)
 
         file_set = {} # This will be populated by process_compressed
@@ -50,13 +35,15 @@ class FileOrchestrator:
         # Construct result_list from file_set, ensuring keys match DatabaseHandler expectations
         result_list = []
         for key_path, file_info in file_set.items(): # key_path is the actual path of the file processed (either the uploaded single file, or an extracted file)
-            if not all(k in file_info for k in ["hash", "converted_path", "file_type", "user_facing_original_name", "actual_source_path_for_publishing"]):
-                LogService.error_log(f"Skipping file_info for key {key_path} due to missing essential keys. Info: {file_info}", TASK_NAME)
+            # Update the key names in this check:
+            required_keys = ["hash", "converted_path", "file_type", "original_filename_for_check", "source_path_for_publishing"]
+            if not all(k in file_info for k in required_keys):
+                LogService.error_log(f"Skipping file_info for key {key_path} due to missing essential keys ({required_keys}). Info: {file_info}", TASK_NAME)
                 continue
 
             result_list.append({
-                "user_facing_original_name": file_info["user_facing_original_name"],
-                "actual_source_path_for_publishing": file_info["actual_source_path_for_publishing"],
+                "original_filename_for_check": file_info["original_filename_for_check"], # Key changed
+                "source_path_for_publishing": file_info["source_path_for_publishing"], # Key changed
                 "hash": file_info["hash"],
                 "converted_path": str(file_info["converted_path"]).replace('\\', '/'), # Ensure path is clean
                 "file_type": file_info["file_type"]

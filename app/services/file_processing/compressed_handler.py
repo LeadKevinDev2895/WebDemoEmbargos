@@ -185,8 +185,8 @@ class CompressedFileHandler:
                                 "hash": file_hash,
                                 "converted_path": str(converted_path) if converted_path else str(extracted_file_full_path),
                                 "file_type": file_type,
-                                "user_facing_original_name": relative_path_in_archive.replace('\\', '/'), # Path inside archive
-                                "actual_source_path_for_publishing": extracted_file_full_path # This is the file to publish
+                                "original_filename_for_check": relative_path_in_archive.replace('\\', '/'), # Key changed
+                                "source_path_for_publishing": extracted_file_full_path  # Key changed
                             }
                         except Exception as e_proc:
                             LogService.error_log(f"Error processing extracted file {extracted_file_full_path}: {e_proc}", TASK_NAME)
@@ -211,8 +211,8 @@ class CompressedFileHandler:
                     "hash": file_hash,
                     "converted_path": str(converted_path) if converted_path else str(file_path_abs),
                     "file_type": file_type,
-                    "user_facing_original_name": user_name, # Original filename given by user
-                    "actual_source_path_for_publishing": file_path_abs # This is the file to publish
+                    "original_filename_for_check": user_name, # Key changed
+                    "source_path_for_publishing": file_path_abs  # Key changed
                 }
             except Exception as e_proc_single:
                 LogService.error_log(f"Error processing single file {file_path_abs}: {e_proc_single}", TASK_NAME)

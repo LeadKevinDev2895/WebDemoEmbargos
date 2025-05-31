@@ -23,83 +23,66 @@ class DatabaseHandler:
         print(f"Insertando documentos en la base de datos")
         print(f"Result list: {result_list}")
         for entry in result_list:
-            user_facing_original_name = str(Path(entry["user_facing_original_name"]))
-            actual_source_path = str(Path(entry["actual_source_path_for_publishing"]))
-            converted_path = str(Path(entry["converted_path"]))
+            original_filename_for_check = str(Path(entry["original_filename_for_check"]))
+            source_path_for_publishing = str(Path(entry["source_path_for_publishing"]))
+            converted_path_from_processor = str(Path(entry["converted_path"]))
             file_hash = entry["hash"]
             file_type = entry["file_type"]
 
-            print(f"Procesando entrada para la base de datos: {entry} (Original Name: {user_facing_original_name})")
-            LogService.audit_log(f"Procesando entrada para la base de datos (Original Name: {user_facing_original_name}): {entry}", TASK_NAME)
+            LogService.audit_log(f"DB Handler: Processing entry for '{original_filename_for_check}'. Hash: {file_hash}", TASK_NAME)
 
+            # Path for the converted document (e.g., the PDF version)
+            final_ruta_convertido = self.file_publisher.copy_converted_file(converted_path_from_processor)
+
+            # Path for the published original-form document
+            final_ruta_publicado = None # Default to None
+
+            # Duplicate checks
             hash_exists = DocumentoRepository.hash_exists(file_hash)
-            nombre_archivo = os.path.basename(user_facing_original_name).split('.')[0] # Use user-facing name for this check
-            
-            archivo_exists = DocumentoRepository.exists_by_nombre_archivo(nombre_archivo)
-            print(f"Hash exist? {hash_exists}, Archivo (based on user_facing_original_name) exist? {archivo_exists}")
 
-            LogService.audit_log(f"Validación de existencia del archivo '{user_facing_original_name}' en la base de datos (by name): {archivo_exists}", TASK_NAME)
-            print(f"Validando existencia del hash en la base de datos: {file_hash} (for {user_facing_original_name})")
-            LogService.audit_log(f"Validando existencia del hash '{file_hash}' en la base de datos (for {user_facing_original_name})", TASK_NAME)
+            # Use the filename part for the name check, as per original logic if DocumentoRepository.exists_by_nombre_archivo expects name without extension
+            nombre_check_part = os.path.splitext(os.path.basename(original_filename_for_check))[0]
+            name_exists_in_db = DocumentoRepository.exists_by_nombre_archivo(nombre_check_part) # This returns ID or None
 
-            final_converted_path_location = self.file_publisher.copy_converted_file(converted_path)
+            allow_duplicates_by_config = current_app.config['PARAMETROS']['InsertarDocumentosDuplicados']
 
-            validate_hash_and_route = current_app.config['PARAMETROS']['InsertarDocumentosDuplicados']
+            if not allow_duplicates_by_config:
+                if hash_exists: # If content is the same, strictly skip.
+                    LogService.audit_log(f"Skipping DB insert for '{original_filename_for_check}': Hash '{file_hash}' already exists.", TASK_NAME)
+                    continue # Skip to the next entry in result_list
+                # If hash doesn't exist, but name_exists_in_db is true, it's new content for an existing name. We will publish and insert.
+                # If neither hash nor name exists, it's a new file. We will publish and insert.
+
+            # If we reach here, it means either duplicates are allowed by config,
+            # or they are not allowed AND the hash didn't exist.
+            # In these cases, we attempt to publish the original-form file.
+            LogService.audit_log(f"Attempting to publish original-form file for '{original_filename_for_check}'. Source: {source_path_for_publishing}", TASK_NAME)
+            final_ruta_publicado = self.file_publisher.publish_file(source_path_for_publishing)
+            if final_ruta_publicado:
+                LogService.audit_log(f"Successfully published '{original_filename_for_check}' to '{final_ruta_publicado}'.", TASK_NAME)
+            else:
+                LogService.error_log(f"Failed to publish '{original_filename_for_check}'. 'rutaDocumento' will be NULL.", TASK_NAME)
 
             data_documento = {
-                # "rutaDocumento": original_path, # Will be set based on publishing
-                "rutaDocumentoConvertido": final_converted_path_location,
+                "rutaDocumentoConvertido": final_ruta_convertido,
+                "rutaDocumento": final_ruta_publicado, # This will be None if publishing failed
                 "hashDocumento": file_hash,
-                "estadoOficio": "Pendiente",
-                "nombreOriginal": user_facing_original_name, # Assuming Documento model has this field
-                "estadoProceso": EstadoProceso.DESGARGADO.value, # Or a new status like "CARGADO_USUARIO"? For now, DESGARGADO.
+                "estadoOficio": "Pendiente", # Default status
+                "estadoProceso": EstadoProceso.DESGARGADO.value, # Default status
                 "tipoDocumento": file_type,
                 "corte": calcular_corte()
+                # NO "nombreOriginal" field
             }
-
-            # Default rutaDocumento to the name the user gave it, in case it's not published.
-            data_documento["rutaDocumento"] = user_facing_original_name
-
-            if not validate_hash_and_route:
-                if hash_exists and archivo_exists:
-                    print(f"Documento con hash {file_hash} (nombre: {user_facing_original_name}) ya existe. No se insertará.")
-                    LogService.audit_log(f"El archivo {user_facing_original_name} (hash: {file_hash}) ya existe. No se insertará.", TASK_NAME)
-                    continue
-                # elif hash_exists and archivo_exists is None: # This was commented out before
-                #     print(f"Documento con hash {file_hash} ya existe. Se actualizará el estado.")
-                #     LogService.audit_log(f"El archivo {nombre_archivo} ya existe. Se actualizará el estado.", TASK_NAME)
-                #     data_documento["estadoProceso"] = "Documento Duplicado"
-                #     data_documento["estadoOficio"] = "Documento no procesable por duplicidad"
-                elif hash_exists is None and archivo_exists: # File name exists, but different content
-                    LogService.audit_log(f"El archivo con nombre {user_facing_original_name} existe pero tiene hash diferente. Se publicará nueva versión.", TASK_NAME)
-                    # Use actual_source_path for publishing
-                    nueva_ruta_publicador = self.file_publisher.publish_file(actual_source_path)
-                    if nueva_ruta_publicador:
-                        data_documento["rutaDocumento"] = nueva_ruta_publicador
-                else: # Neither hash nor name exists (truly new file)
-                    LogService.audit_log(f"El archivo {user_facing_original_name} no existe previamente. Se publicará.", TASK_NAME)
-                    # Use actual_source_path for publishing
-                    nueva_ruta_publicador = self.file_publisher.publish_file(actual_source_path)
-                    if nueva_ruta_publicador:
-                        data_documento["rutaDocumento"] = nueva_ruta_publicador
-            else: # If duplicate validation is off, always publish
-                LogService.audit_log(f"Validación de duplicados desactivada. Publicando {user_facing_original_name}.", TASK_NAME)
-                # Use actual_source_path for publishing
-                nueva_ruta_publicador = self.file_publisher.publish_file(actual_source_path)
-                if nueva_ruta_publicador:
-                    data_documento["rutaDocumento"] = nueva_ruta_publicador
 
             try:
                 documento_creado = DocumentoRepository.create(data_documento)
                 if documento_creado:
-                    print(f"Documento creado con ID: {documento_creado.id}")
-                    LogService.audit_log(f"Documento creado con ID: {documento_creado.id}", TASK_NAME)
-                else:
-                    print("No se pudo crear el documento.")
-                    LogService.error_log("No se pudo crear el documento.", TASK_NAME)
-            except Exception as e:
-                print(f"Error al crear el documento: {e}")
-                LogService.error_log(f"Error al crear el documento: {e}", TASK_NAME)
+                    LogService.audit_log(f"Documento record created for '{original_filename_for_check}' with ID: {documento_creado.id}. Published: {final_ruta_publicado}, Converted: {final_ruta_convertido}", TASK_NAME)
+                else: # Should not happen if create raises exception on failure
+                    LogService.error_log(f"DocumentoRepository.create returned None for '{original_filename_for_check}'.", TASK_NAME)
+            except Exception as e_create:
+                LogService.error_log(f"Error creating Documento record for '{original_filename_for_check}': {e_create}. Data: {data_documento}", TASK_NAME)
+                # If DB create fails, we might want to skip this entry or handle error. For now, loop continues.
 
         LogService.audit_log("Actualizando IDs de documentos relacionados.", TASK_NAME)
         print("Actualizando IDs de documentos relacionados.")
