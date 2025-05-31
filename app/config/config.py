@@ -67,6 +67,7 @@ class Config:
             "PORT": os.getenv('FLASK_PORT'),
             "DEBUG": os.getenv('FLASK_DEBUG'),
             }
+        self.SECRET_KEY = os.getenv('SECRET_KEY', 'configure_a_strong_random_secret_key_in_env') # Default is for dev only
 
 
     def get_sqlalchemy_database_uri(self):
