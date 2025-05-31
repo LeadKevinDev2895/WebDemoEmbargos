@@ -1,7 +1,7 @@
 import os
 import shutil
 from datetime import datetime
-import subprocess
+# import subprocess # Removed
 import traceback
 
 class LocalBucketTransfer:
@@ -33,13 +33,7 @@ class LocalBucketTransfer:
         destination_folder = os.path.join(self.base_path, year, month, day)
         os.makedirs(destination_folder, exist_ok=True)
         
-        # Asegurar permisos para todo el árbol de directorios
-        try:
-            print(f"Cambiando permisos de {destination_folder}")
-            subprocess.run(['chmod', '-R', '777', destination_folder], check=True)
-            print(f"Permisos cambiados de {destination_folder}")
-        except subprocess.CalledProcessError as e:
-            print(f"Error al cambiar permisos de {destination_folder}: {e}")
+        # The chmod block was here and is now removed.
         
         return os.path.join(destination_folder, new_filename)
     
