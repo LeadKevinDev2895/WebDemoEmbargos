@@ -314,3 +314,13 @@ class DocumentoRepository:
             {Documento.estadoProceso: 'Procesado'}, synchronize_session=False
         )
         db.session.commit()
+
+    @staticmethod
+    def get_by_hash(hash_value: str):
+        """
+        Retrieve a document by its hashDocumento.
+
+        :param hash_value: The hash value to search for.
+        :return: The Documento object if found, else None.
+        """
+        return Documento.query.filter_by(hashDocumento=hash_value).first()

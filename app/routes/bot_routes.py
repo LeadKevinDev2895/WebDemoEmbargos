@@ -64,9 +64,9 @@ def upload_document_or_archive():
     if file:
         try:
             bot = Bot(current_app._get_current_object())
-            # This method will be created in the next step in app/bot.py
-            success, message = bot.run_unified_upload_processing(file)
-            flash(message, 'success' if success else 'error')
+            # Bot method now returns: overall_success (bool), message_for_ui (str), ui_category (str)
+            overall_success, message_for_ui, ui_category = bot.run_unified_upload_processing(file)
+            flash(message_for_ui, ui_category) # Use the category returned by the Bot
         except Exception as e:
             # Log the exception e using LogService or current_app.logger
             # For now, flash a generic error.

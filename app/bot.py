@@ -112,13 +112,18 @@ class Bot:
     def run_unified_upload_processing(self, uploaded_file_object):
         if not uploaded_file_object or not uploaded_file_object.filename:
             LogService.error_log("Invalid file object or filename received for upload.", self.bot_name)
-            return False, "No file or filename provided."
+            return False, "No file or filename provided.", "error" # Return category
 
         original_filename = secure_filename(uploaded_file_object.filename)
         LogService.audit_log(f"Attempting unified upload for: {original_filename}", self.bot_name)
 
-        temp_dir = None # Define temp_dir to ensure it's in scope for finally
-        temp_save_path = None # Define temp_save_path for broader scope in finally
+        temp_dir = None
+        temp_save_path = None
+
+        # Default return values
+        overall_success = False
+        message_for_ui = f"An error occurred while processing '{original_filename}'."
+        ui_category = "error"
 
         try:
             with self.app.app_context(): # Ensure app context for config access
@@ -130,57 +135,92 @@ class Bot:
             LogService.audit_log(f"Attempting to save uploaded file to: {temp_save_path}", self.bot_name)
             uploaded_file_object.save(temp_save_path)
 
-            # ---- START DIAGNOSTIC LOGS ----
             LogService.audit_log(f"File supposedly saved to: {temp_save_path}", self.bot_name)
-            if os.path.exists(temp_save_path):
-                LogService.audit_log(f"CONFIRMED by os.path.exists: File is present at {temp_save_path} immediately after save.", self.bot_name)
-                # Optional: Check file size if useful
-                try:
-                    file_size = os.path.getsize(temp_save_path)
-                    LogService.audit_log(f"CONFIRMED file size: {file_size} bytes at {temp_save_path}.", self.bot_name)
-                    if file_size == 0:
-                        LogService.error_log(f"WARNING: File at {temp_save_path} is 0 bytes after save!", self.bot_name)
-                except OSError as e_size:
-                    LogService.error_log(f"WARNING: Could not get size for file at {temp_save_path}: {e_size}", self.bot_name)
-
-            else:
+            if not os.path.exists(temp_save_path):
                 LogService.error_log(f"CRITICAL ERROR: File DOES NOT exist at {temp_save_path} immediately after save operation!", self.bot_name)
-                # Consider the implications if the save operation itself might raise an error that's caught by the outer try-except.
-                # If save() fails and raises an IOError/OSError, it might be caught by the broader 'except Exception as e'.
-                # This specific check is for cases where save() doesn't raise an error but the file is still not found.
-                return False, f"Failed to save uploaded file to temporary path. Check logs for path: {temp_save_path}" # Early exit
-            # ---- END DIAGNOSTIC LOGS ----
+                return False, f"Failed to save uploaded file to temporary path: {temp_save_path}", "error"
+
+            # (Optional: file size check logs can remain if desired)
+            try:
+                file_size = os.path.getsize(temp_save_path)
+                LogService.audit_log(f"CONFIRMED file size: {file_size} bytes at {temp_save_path}.", self.bot_name)
+                if file_size == 0:
+                    LogService.error_log(f"WARNING: File at {temp_save_path} is 0 bytes after save!", self.bot_name)
+                    # Potentially return error here too if 0 byte files are invalid
+                    # return False, f"Uploaded file '{original_filename}' is empty (0 bytes).", "error"
+            except OSError as e_size:
+                LogService.error_log(f"WARNING: Could not get size for file at {temp_save_path}: {e_size}", self.bot_name)
+
 
             file_orchestrator = self._get_file_orchestrator()
 
-            # Assuming process_file_main will be adapted to handle original_filename
-            # and internally pass it to where it's needed (CompressedFileHandler for single files).
-            # For now, process_file_main might not use original_filename directly,
-            # but CompressedFileHandler will need it.
-            # The result_list from process_file_main is not directly used here for messaging,
-            # as process_file_main's main job is orchestration and DB insertion.
-            # We rely on logs for details and assume success if no exception.
+            # process_file_main now returns a list of status objects
+            # [{'filename': ..., 'status': ..., 'message_detail': ...}, ...]
+            processed_results = file_orchestrator.process_file_main(temp_save_path, original_filename_param=original_filename)
 
-            # process_file_main returns a result_list, but for messaging, we'll give a generic one for now,
-            # or adapt process_file_main to return a (bool, message) pair.
-            # For now, let's assume it raises exceptions on critical failure.
-            file_orchestrator.process_file_main(temp_save_path, original_filename_param=original_filename)
-            # Se unen archivos hijos a archivos padre
-            file_orchestrator.unir_archivos_padre_hijos()
+            if not processed_results: # If process_file_main returned empty or None (e.g. error before processing any file info)
+                LogService.error_log(f"No processing results returned from FileOrchestrator for '{original_filename}'.", self.bot_name)
+                message_for_ui = f"Processing failed to return any results for '{original_filename}'."
+                ui_category = "error"
+                # overall_success remains False
+            elif len(processed_results) == 1: # Single file upload scenario (or archive with one file)
+                result = processed_results[0]
+                fn = result.get('filename', original_filename) # Fallback to original_filename
+                status = result.get('status')
+                detail = result.get('message_detail', '')
 
-            # If process_file_main completes without error, assume success for this high-level task.
-            # Detailed per-file success/failure is handled within the orchestrator/DB handler.
-            success_message = f"File '{original_filename}' received and processing initiated."
-            LogService.audit_log(success_message, self.bot_name)
-            return True, success_message
+                if status == 'duplicate_true':
+                    message_for_ui = f"File '{fn}' has already been processed. Current DB status: '{detail}'."
+                    ui_category = 'warning'
+                    overall_success = True # Operation completed, duplicate found
+                elif status == 'reprocessing_triggered':
+                    message_for_ui = f"File '{fn}' was updated with new content and set for Reprocessing."
+                    ui_category = 'info' # Using 'info' for this distinct state
+                    overall_success = True # Operation completed, reprocessing triggered
+                elif status in ['processed_new', 'processed_new_duplicates_allowed']:
+                    message_for_ui = f"File '{fn}' processed successfully. {detail if 'DB ID' in detail else ''}".strip()
+                    ui_category = 'success'
+                    overall_success = True
+                else: # Includes 'error' status from DatabaseHandler or other unknown status
+                    message_for_ui = f"Error processing file '{fn}': {detail}"
+                    ui_category = 'error'
+                    overall_success = False
+            else: # Archive with multiple files
+                # Summarize for multiple files
+                success_count = sum(1 for r in processed_results if r.get('status') in ['processed_new', 'processed_new_duplicates_allowed'])
+                duplicate_count = sum(1 for r in processed_results if r.get('status') == 'duplicate_true')
+                reprocessing_count = sum(1 for r in processed_results if r.get('status') == 'reprocessing_triggered')
+                error_count = len(processed_results) - success_count - duplicate_count - reprocessing_count
+
+                message_for_ui = f"Archive '{original_filename}' processed. Total: {len(processed_results)} files. " \
+                                 f"Successful: {success_count}, Duplicates: {duplicate_count}, Reprocessing: {reprocessing_count}, Errors: {error_count}."
+                if error_count > 0 or reprocessing_count > 0 or duplicate_count > 0 :
+                    ui_category = 'warning' # Use warning if any non-standard success
+                else:
+                    ui_category = 'success'
+                overall_success = True # Batch operation itself completed
+
+            # --- Add post-processing calls ---
+            if overall_success: # Only run these if the main processing part seemed to complete
+                LogService.audit_log("Executing post-upload global processing steps.", self.bot_name)
+                try:
+                    database_handler = file_orchestrator.database_handler
+                    database_handler.update_excel_processing_type()
+                    database_handler.report_process()
+                    file_orchestrator.stabilize_estado_proceso()
+                    LogService.audit_log("Post-upload global processing steps completed.", self.bot_name)
+                except Exception as e_post_proc:
+                    LogService.error_log(f"Error during post-upload global processing steps: {e_post_proc}", self.bot_name)
+                    # Optionally append to message_for_ui or change status if these are critical
+                    # For now, just log. The main file operation status is already set.
 
         except Exception as e:
-            error_message = f"Error during unified upload processing for '{original_filename}': {str(e)}"
-            LogService.error_log(error_message, self.bot_name)
-            # Consider logging traceback.format_exc() for more detail in logs
-            return False, error_message
+            # This catches errors from file save, _get_file_orchestrator, or if process_file_main itself raises an unhandled one
+            message_for_ui = f"Critical error during unified upload processing for '{original_filename}': {str(e)}"
+            LogService.error_log(message_for_ui + f" Traceback: {traceback.format_exc()}", self.bot_name) # Add traceback
+            ui_category = "error"
+            overall_success = False
         finally:
-            # Clean up the temporarily saved file
             if temp_save_path and os.path.exists(temp_save_path):
                 try:
                     os.remove(temp_save_path)

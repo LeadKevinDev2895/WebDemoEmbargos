@@ -55,8 +55,8 @@ class FileOrchestrator:
              LogService.audit_log(f"No files were processed (file_set is empty) for {file_path} (original: {original_filename_param}). This might be normal if it was an empty archive or an unsupported single file type not processed by CompressedFileHandler.", TASK_NAME)
 
 
-        self.database_handler.insert_document_data(result_list)
-        return result_list # Return the list of processed data, useful for logging or potential future use.
+        detailed_status_results = self.database_handler.insert_document_data(result_list)
+        return detailed_status_results # Return the detailed status list from database_handler
 
     def unir_archivos_padre_hijos(self):
         """
