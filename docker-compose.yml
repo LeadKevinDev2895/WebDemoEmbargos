@@ -1,0 +1,21 @@
+
+services:
+  embargos-api:
+    container_name: Dav_Embargos_API
+    build: .
+    restart: always
+    ports:
+      - 5000:5000  # Ajusta el puerto según tu configuración de Flask/FastAPI
+    volumes:
+      - /mnt/Datos/Docker/DavExtraccion:/app/DavExtraccion/
+      #- /mnt/sftp:/mnt/sftp  # (Opcional) Monta un volumen persistente
+    privileged: true       # Habilita privilegios extendidos
+    cap_add:
+      - SYS_ADMIN          # Permite operaciones administrativas en el contenedor
+    env_file:
+      - ./docker/.env  # 📌 Asegura que se cargue desde la carpeta correcta
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"       # Límite de CPU de 2
+          memory: 2GB       # Límite de RAM de 2GB

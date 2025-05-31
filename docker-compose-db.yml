@@ -1,0 +1,16 @@
+services:
+  postgres:
+    image: postgres
+    container_name: Dav_Embargos_Cen_BD
+    environment:
+      POSTGRES_DB: centralizacion
+      POSTGRES_USER: rpa_trycore
+      POSTGRES_PASSWORD: 01qW3OaH07Wg
+      POSTGRES_HOST_AUTH_METHOD: trust
+    volumes:
+      - ./postgres-data:/var/lib/postgresql/data
+      - ./BD/EsquemaDB.sql:/docker-entrypoint-initdb.d/EsquemaDB.sql
+      - ./BD/Prompts.sql:/docker-entrypoint-initdb.d/Prompts.sql
+    ports:
+      - 5439:5432 
+    restart: always

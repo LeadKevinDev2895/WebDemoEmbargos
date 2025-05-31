@@ -1,0 +1,16 @@
+PyPDF2
+python-dotenv
+flask
+flask_migrate
+flask_sqlalchemy
+py7zr
+rarfile
+PyMuPDF
+Pillow
+pandas
+selenium
+openpyxl
+webdriver_manager
+reportlab
+psycopg2-binary
+pycryptodome
