@@ -126,8 +126,30 @@ class Bot:
                 os.makedirs(temp_dir, exist_ok=True)
 
             temp_save_path = os.path.join(temp_dir, original_filename)
+
+            LogService.audit_log(f"Attempting to save uploaded file to: {temp_save_path}", self.bot_name)
             uploaded_file_object.save(temp_save_path)
-            LogService.audit_log(f"File saved temporarily to {temp_save_path}", self.bot_name)
+
+            # ---- START DIAGNOSTIC LOGS ----
+            LogService.audit_log(f"File supposedly saved to: {temp_save_path}", self.bot_name)
+            if os.path.exists(temp_save_path):
+                LogService.audit_log(f"CONFIRMED by os.path.exists: File is present at {temp_save_path} immediately after save.", self.bot_name)
+                # Optional: Check file size if useful
+                try:
+                    file_size = os.path.getsize(temp_save_path)
+                    LogService.audit_log(f"CONFIRMED file size: {file_size} bytes at {temp_save_path}.", self.bot_name)
+                    if file_size == 0:
+                        LogService.error_log(f"WARNING: File at {temp_save_path} is 0 bytes after save!", self.bot_name)
+                except OSError as e_size:
+                    LogService.error_log(f"WARNING: Could not get size for file at {temp_save_path}: {e_size}", self.bot_name)
+
+            else:
+                LogService.error_log(f"CRITICAL ERROR: File DOES NOT exist at {temp_save_path} immediately after save operation!", self.bot_name)
+                # Consider the implications if the save operation itself might raise an error that's caught by the outer try-except.
+                # If save() fails and raises an IOError/OSError, it might be caught by the broader 'except Exception as e'.
+                # This specific check is for cases where save() doesn't raise an error but the file is still not found.
+                return False, f"Failed to save uploaded file to temporary path. Check logs for path: {temp_save_path}" # Early exit
+            # ---- END DIAGNOSTIC LOGS ----
 
             file_orchestrator = self._get_file_orchestrator()
 
