@@ -2,6 +2,8 @@ import os
 from dotenv import load_dotenv
 from flask import Blueprint, jsonify, current_app, request, render_template, flash, redirect, url_for
 from app.bot import Bot
+from app.utils.LogService import LogService
+import traceback
 
 
 # Crear el Blueprint para las rutas
@@ -64,14 +66,23 @@ def upload_document_or_archive():
     if file:
         try:
             bot = Bot(current_app._get_current_object())
-            # Bot method now returns: overall_success (bool), message_for_ui (str), ui_category (str)
-            overall_success, message_for_ui, ui_category = bot.run_unified_upload_processing(file)
-            flash(message_for_ui, ui_category) # Use the category returned by the Bot
+            result_tuple = bot.run_unified_upload_processing(file) # Store result first
+
+            if result_tuple is None:
+                # Log this critical internal error
+                error_msg_internal = "Internal Error: Bot's unified processing method returned None unexpectedly."
+                # Assuming LogService is available. If not, current_app.logger.error can be used.
+                LogService.error_log(error_msg_internal, "Routes.upload_document_or_archive")
+                flash("A critical internal error occurred. Please contact support or check server logs.", "error")
+                return redirect(url_for('routes.upload_ui')) # Redirect to avoid unpack error
+
+            overall_success, message_for_ui, ui_category = result_tuple # Unpack if not None
+            flash(message_for_ui, ui_category)
         except Exception as e:
-            # Log the exception e using LogService or current_app.logger
-            # For now, flash a generic error.
-            # Consider using LogService.error_log(f"Error in upload: {e}", "Routes")
-            flash(f"An unexpected error occurred during processing: {str(e)}", 'error')
+            # Log the exception with traceback for better debugging
+            error_details = f"Exception in upload_document_or_archive route: {str(e)}\nTraceback: {traceback.format_exc()}"
+            LogService.error_log(error_details, "Routes.upload_document_or_archive")
+            flash(f"An unexpected error occurred during processing: {str(e)}", "error")
     else:
         # This case should ideally not be reached if above checks are done.
         flash('File upload failed for an unknown reason.', 'error')
